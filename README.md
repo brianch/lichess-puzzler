@@ -1,3 +1,13 @@
+this is a fork of https://github.com/kraktus/lichess-puzzler, which itself is a fork of the lichess puzzle generator.
+
+Here the exported csv format is customized to be compatible with lichess puzzle database readers, like my other project, [offline-chess-puzzles](https://github.com/brianch/offline-chess-puzzles).
+
+if possible, I'll also try to make a GUI and some other changes to make it more convenient to generate puzzles from our own games.
+
+below is the original readme.
+
+
+------
 
 lichess puzzler (WC version)
 ----------------------------
