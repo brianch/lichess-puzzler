@@ -263,7 +263,7 @@ def open_file(file: str):
 def main() -> None:
     sys.setrecursionlimit(10000) # else node.deepcopy() sometimes fails?
     args = parse_args()
-    if args.verbose >= 2:
+    if args.verbose and args.verbose >= 2:
         logger.setLevel(logging.DEBUG)
     else:
         logger.setLevel(logging.INFO)
