@@ -63,14 +63,20 @@ class Server:
         parent = puzzle.node.parent
         assert parent
         json = {
+            'PuzzleId': game.headers.get("Site", "?")[20:] + str(parent.ply()),
+            'Fen': parent.board().fen(),
+            'Moves': puzzle.node.uci() + ' ' + ' '.join(map(lambda m : m.uci(), puzzle.moves)),
+            'Rating': 1500,
+            'RatingDeviation': 80,
+            'Popularity': 100,
+            'NbPlays': 0,
+            'Themes': '',
+            'GameUrl': game.headers.get("Site", "?") + '#' + str(parent.ply()),
+            'OpeningTags': '',
             'white': game.headers.get("White", "?"),
             'black': game.headers.get("Black", "?"),
-            'game_id': game.headers.get("Site", "?")[20:],
-            'fen': parent.board().fen(),
-            'ply': parent.ply(),
-            'moves': [puzzle.node.uci()] + list(map(lambda m : m.uci(), puzzle.moves)),
-            'cp': puzzle.cp,
-            'generator_version': self.version,
+            #'cp': puzzle.cp,
+            #'generator_version': self.version,
         }
         if not self.url:
             print(json)
