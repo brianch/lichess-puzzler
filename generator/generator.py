@@ -6,17 +6,17 @@ import chess.engine
 import copy
 import sys
 import util
-import zstandard
+import csv
 from model import Puzzle, NextMovePair
+
 from io import StringIO
-from chess import Move, Color
+from chess import Move, Color, Board
 from chess.engine import SimpleEngine, Mate, Cp, Score, PovScore
 from chess.pgn import Game, ChildNode
 
 from pathlib import Path
 from typing import List, Optional, Union, Set
 from util import count_mates, get_next_move_pair, material_count, material_diff, is_up_in_material, maximum_castling_rights, win_chances
-from server import Server
 
 version = "48WC9" # Was made for the World Championship first
 
@@ -30,9 +30,8 @@ mate_defense_limit = chess.engine.Limit(depth = 15, time = 10, nodes = 10_000_00
 mate_soon = Mate(15)
 
 class Generator:
-    def __init__(self, engine: SimpleEngine, server: Server):
+    def __init__(self, engine: SimpleEngine):
         self.engine = engine
-        self.server = server
         self.not_analysed_warning = False
 
     def is_valid_mate_in_one(self, pair: NextMovePair) -> bool:
@@ -197,24 +196,28 @@ class Generator:
             return score
         elif score > mate_soon:
             logger.debug("Mate {}#{} Probing...".format(game_url, node.ply()))
+            '''
             if self.server.is_seen_pos(node):
                 logger.debug("Skip duplicate position")
                 return score
+            '''
             mate_solution = self.cook_mate(copy.deepcopy(node), winner)
             if mate_solution is None or (tier == 1 and len(mate_solution) == 3):
                 return score
-            return Puzzle(node, mate_solution, 999999999)
+            return Puzzle(node, mate_solution, 999999999, node.game().headers.get("Site", "?")[20:])
         elif score >= Cp(200) and win_chances(score) > win_chances(prev_score) + 0.6:
             if score < Cp(400) and material_diff(board, winner) > -1:
                 logger.debug("Not clearly winning and not from being down in material, aborting")
                 return score
             logger.debug("Advantage {}#{} {} -> {}. Probing...".format(game_url, node.ply(), prev_score, score))
+            '''
             if self.server.is_seen_pos(node):
                 logger.debug("Skip duplicate position")
                 return score
+            '''
             puzzle_node = copy.deepcopy(node)
             solution : Optional[List[NextMovePair]] = self.cook_advantage(puzzle_node, winner)
-            self.server.set_seen(node.game())
+            #self.server.set_seen(node.game())
             if not solution:
                 return score
             while len(solution) % 2 == 0 or not solution[-1].second:
@@ -228,7 +231,7 @@ class Generator:
                 logger.debug("Discard two-mover")
                 return score
             cp = solution[len(solution) - 1].best.score.score()
-            return Puzzle(node, [p.best.move for p in solution], 999999998 if cp is None else cp)
+            return Puzzle(node, [p.best.move for p in solution], 999999998 if cp is None else cp, node.game().headers.get("Site", "?")[20:])
         else:
             return score
 
@@ -240,8 +243,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--file", "-f", help="input PGN file", required=True, metavar="FILE.pgn")
     parser.add_argument("--engine", "-e", help="analysis engine", default="stockfish")
     parser.add_argument("--threads", "-t", help="count of cpu threads for engine searches", default="4")
-    parser.add_argument("--url", "-u", help="URL where to post puzzles", default="")
-    parser.add_argument("--token", help="Server secret token", default="changeme")
     parser.add_argument("--skip", help="How many games to skip from the source", default="0")
     parser.add_argument("--verbose", "-v", help="increase verbosity", action="count")
     parser.add_argument("--players", nargs='+', help="A list of players. If set, only generate games in which one of them played")
@@ -260,16 +261,42 @@ def open_file(file: str):
         return zstandard.open(file, "rt")
     return open(file)
 
+def post(game: Game, puzzle: Puzzle, name: str, write_h: bool = False) -> None:
+    parent = puzzle.node.parent
+    assert parent
+    json = {
+        'PuzzleId': game.headers.get("Site", "?")[20:] + str(parent.ply()),
+        'Fen': parent.board().fen(),
+        'Moves': puzzle.node.uci() + ' ' + ' '.join(map(lambda m : m.uci(), puzzle.moves)),
+        'Rating': 1500,
+        'RatingDeviation': 80,
+        'Popularity': 100,
+        'NbPlays': 0,
+        'GameUrl': game.headers.get("Site", "?") + '#' + str(parent.ply()),
+        'OpeningTags': '',
+        'white': game.headers.get("White", "?"),
+        'black': game.headers.get("Black", "?"),
+        #'cp': puzzle.cp,
+        #'generator_version': self.version,
+    }
+    print(json)
+    with open(f"{name}.csv", "w" if write_h else "a") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=json.keys())
+        if write_h:
+            writer.writeheader()
+        writer.writerow(json)
+    return None
+
 def main() -> None:
     sys.setrecursionlimit(10000) # else node.deepcopy() sometimes fails?
     args = parse_args()
-    if args.verbose and args.verbose >= 2:
-        logger.setLevel(logging.DEBUG)
-    else:
-        logger.setLevel(logging.INFO)
+    #if args.verbose and args.verbose >= 2:
+        #logger.setLevel(logging.DEBUG)
+    #else:
+        #logger.setLevel(logging.INFO)
+    logger.setLevel(logging.DEBUG)
     engine = make_engine(args.engine, args.threads)
-    server = Server(logger, args.url, args.token, version)
-    generator = Generator(engine, server)
+    generator = Generator(engine)
     file = Path(args.file)
     games = 0
     site = "?"
@@ -323,8 +350,7 @@ def main() -> None:
                     puzzle = generator.analyze_game(game, tier)
                     if puzzle is not None:
                         logger.info(f'v{version} {args.file} {util.avg_knps()} knps, tier {tier}, game {i}')
-                        print(f"Game: {game_id}")
-                        server.post(game, puzzle, "_".join(players) if players is not None else file.stem, write_h)
+                        post(game, puzzle, "_".join(players) if players is not None else file.stem, write_h)
                         write_h = False
                 except Exception as e:
                     logger.error("Exception on {}: {}".format(game_id, e))

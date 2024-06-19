@@ -9,6 +9,7 @@ class Puzzle:
     node: ChildNode
     moves: List[Move]
     cp: int
+    id: str
 
 @dataclass
 class Line:
